@@ -29,7 +29,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <java.version>1.8</java.version>
+        <java.version>17</java.version>
         <skipTests>true</skipTests>
         <docker.host>http://192.168.3.101:2375</docker.host>
         <docker.maven.plugin.version>0.40.2</docker.maven.plugin.version>
@@ -53,6 +53,10 @@
         <mall-common.version>1.0-SNAPSHOT</mall-common.version>
         <mall-mbg.version>1.0-SNAPSHOT</mall-mbg.version>
         <mall-security.version>1.0-SNAPSHOT</mall-security.version>
+        <!-- 强制升级 ES 客户端版本以兼容 ES 8.x -->
+        <elasticsearch.version>7.17.14</elasticsearch.version> 
+        <!-- 注意：Spring Boot 2.x 最高只能兼容到 ES 7.17.x 的客户端，
+         但这通常足以连接 ES 8.x (开启兼容模式) -->
     </properties>
 
     <dependencies>

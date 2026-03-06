@@ -33,11 +33,11 @@ public class EsProduct implements Serializable {
     @Field(type = FieldType.Keyword)
     private String productCategoryName;
     private String pic;
-    @Field(analyzer = "ik_max_word",type = FieldType.Text)
+    @Field(type = FieldType.Text)
     private String name;
-    @Field(analyzer = "ik_max_word",type = FieldType.Text)
+    @Field(type = FieldType.Text)
     private String subTitle;
-    @Field(analyzer = "ik_max_word",type = FieldType.Text)
+    @Field(type = FieldType.Text)
     private String keywords;
     private BigDecimal price;
     private Integer sale;
