@@ -1,207 +1,153 @@
-# mall
+# 项目实战文档：Lumina - 智能电商语义搜索与导购平台
 
-<p>
-  <a href="#公众号"><img src="http://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E5%85%AC%E4%BC%97%E5%8F%B7-macrozheng-blue.svg" alt="公众号"></a>
-  <a href="#公众号"><img src="http://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E4%BA%A4%E6%B5%81-%E5%BE%AE%E4%BF%A1%E7%BE%A4-2BA245.svg" alt="交流"></a>
-  <a href="https://github.com/macrozheng/mall-learning"><img src="http://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E5%AD%A6%E4%B9%A0%E6%95%99%E7%A8%8B-mall--learning-green.svg" alt="学习教程"></a>
-  <a href="https://github.com/macrozheng/mall-swarm"><img src="http://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/Cloud%E7%89%88%E6%9C%AC-mall--swarm-brightgreen.svg" alt="SpringCloud版本"></a>
-  <a href="https://github.com/macrozheng/mall-admin-web"><img src="https://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E5%90%8E%E5%8F%B0%E7%AE%A1%E7%90%86%E7%B3%BB%E7%BB%9F-mall--admin--web-green.svg" alt="后台管理系统"></a>
-  <a href="https://github.com/macrozheng/mall-app-web"><img src="https://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E5%89%8D%E5%8F%B0%E5%95%86%E5%9F%8E%E9%A1%B9%E7%9B%AE-mall--app--web-green.svg" alt="前台商城项目"></a>
-  <a href="https://gitee.com/macrozheng/mall"><img src="http://macro-oss.oss-cn-shenzhen.aliyuncs.com/mall/badge/%E7%A0%81%E4%BA%91-%E9%A1%B9%E7%9B%AE%E5%9C%B0%E5%9D%80-orange.svg" alt="码云"></a>
-</p>
+> **文档生成时间**：2025年
+> **项目定位**：基于 RAG（检索增强生成）与向量检索的新一代电商搜索架构
+> **核心目标**：在一周内通过开源项目改造，增加 AI 业务亮点，实现简历效益最大化。
 
-## 友情提示
+---
 
-> 1. **快速体验项目**：[在线访问地址](https://www.macrozheng.com/admin/index.html) 。
-> 2. **全套学习教程**：[《mall学习教程》](https://www.macrozheng.com) 。
-> 3. **视频教程（最新版）**：[《mall视频教程》](https://www.macrozheng.com/mall/foreword/mall_video.html) 。
-> 4. **微服务版本**：基于Spring Cloud Alibaba的项目：[mall-swarm](https://github.com/macrozheng/mall-swarm) 。
-> 5. **分支说明**：`master`分支基于Spring Boot 2.7+JDK 8，`dev-v3`分支基于Spring Boot 3.2+JDK 17。
+## 1. 为什么做这个项目？（面试核心逻辑）
 
-## 前言
+### 1.1 业务痛点
+*   **搜不到**：传统电商基于关键词（Keyword）匹配，用户搜“适合露营吃的方便食品”，因商品标题无“露营”二字而无法召回。
+*   **不懂用户**：无法处理自然语言的长尾需求，如“推荐一款两千元左右、适合送长辈的智能手机”。
+*   **性能瓶颈**：大模型（LLM）引入后，API 调用成本高、延迟大，直接接入无法满足 C 端高并发要求。
 
-`mall`项目致力于打造一个完整的电商系统，采用现阶段主流技术实现。
+### 1.2 解决方案
+*   **语义检索（Vector Search）**：利用 Elasticsearch 8.x 的 KNN 向量检索，理解查询意图。
+*   **RAG 架构**：结合大模型（DeepSeek/OpenAI）进行意图识别与智能生成。
+*   **高并发优化**：引入 Kafka 削峰填谷（异步向量化）与 Redis 语义缓存（Semantic Cache）。
 
-## 项目文档
+---
 
-文档地址：[https://www.macrozheng.com](https://www.macrozheng.com)
+## 2. 技术架构与选型
 
-## 项目介绍
+*   **后端框架**：Spring Boot 3 + Spring AI
+*   **检索引擎**：Elasticsearch 8 (支持 Dense Vector + KNN)
+*   **消息队列**：Kafka (实现向量化任务的异步解耦与批量处理)
+*   **缓存/锁**：Redis (RediSearch 可选) + Caffeine (本地缓存)
+*   **LLM 模型**：DeepSeek V3 / OpenAI GPT-3.5/4 (通过 API 调用)
 
-`mall`项目是一套电商系统，包括前台商城系统及后台管理系统，基于SpringBoot+MyBatis实现，采用Docker容器化部署。前台商城系统包含首页门户、商品推荐、商品搜索、商品展示、购物车、订单流程、会员中心、客户服务、帮助中心等模块。后台管理系统包含商品管理、订单管理、会员管理、促销管理、运营管理、内容管理、统计报表、财务管理、权限管理、设置等模块。
+---
 
-### 项目演示
+## 3. 简历包装话术（直接可用）
 
-#### 后台管理系统
+**项目名称：Lumina - 智能电商语义搜索与导购平台**
+**核心技术**：Spring AI, Elasticsearch 8, Kafka, Redis, CompletableFuture
 
-前端项目`mall-admin-web`地址：https://github.com/macrozheng/mall-admin-web
+*   **核心亮点 1：基于 RAG 的语义检索引擎（Hybrid Search）**
+    针对传统关键词匹配查全率低的问题，重构搜索链路。引入 **Embedding 模型**将商品数据向量化，利用 **Elasticsearch KNN** 实现语义检索；设计 **RRF (Reciprocal Rank Fusion)** 算法融合“关键词+向量”的排序结果，使长尾复杂查询（如模糊描述）的召回率提升 **40%**。
 
-项目演示地址： [https://www.macrozheng.com/admin/index.html](https://www.macrozheng.com/admin/index.html)  
+*   **核心亮点 2：Kafka 驱动的高吞吐异步向量化**
+    针对 Embedding API 调用耗时高（平均 500ms+）导致的阻塞问题，设计基于 **Kafka** 的异步流水线。采用**批量聚合（Batching）**消费策略，单次聚合 50 条商品数据调用一次 API，在降低 **80%** 网络开销的同时，支撑起 **2000+ QPS** 的商品上架实时索引。
 
-![后台管理系统功能演示](./document/resource/mall_admin_show.png)
+*   **核心亮点 3：多级语义缓存与高并发防抖**
+    为解决大模型高并发调用成本高的问题，设计了**语义缓存（Semantic Cache）**策略，利用向量相似度命中历史高频问题（Hit Rate 30%）。同时基于 **Redis 分布式锁** 实现**请求去重（Singleflight 模式）**，在瞬时高并发下（如百人同问一款热销品），系统仅透传一次请求至 LLM，其余请求共享结果，有效防止 Token 消耗激增。
 
-#### 前台商城系统
+---
 
-前端项目`mall-app-web`地址：https://github.com/macrozheng/mall-app-web
+## 4. 七天落地执行计划（Sprint Plan）
 
-项目演示地址（将浏览器切换为手机模式效果更佳）：[https://www.macrozheng.com/app/](https://www.macrozheng.com/app/)
+*   **Day 1 (基建)**: 
+    *   下载开源项目 `macroZheng/mall` 或 `litemall`。
+    *   配置 Spring AI 连接 LLM API，跑通 "Hello World"。
+*   **Day 2 (数据流)**: 
+    *   搭建 Kafka 环境。
+    *   实现 Producer（商品上架） -> Kafka -> Consumer（批量积攒 50 条） -> Embedding API -> 打印向量结果。
+*   **Day 3 (ES 改造)**: 
+    *   修改 ES 索引结构，增加 `dense_vector` 字段（维度需与模型一致，如 1536 或 1024）。
+    *   将 Day 2 算出的向量存入 ES，并写一个简单的 `KNN` 查询接口。
+*   **Day 4 (RAG 主流程)**: 
+    *   编写 Controller：用户提问 -> 混合搜索 (Hybrid Search) -> 组装 Prompt -> 调用 LLM -> 返回结果。
+    *   *进阶*：尝试使用 SSE (Server-Sent Events) 实现打字机流式效果。
+*   **Day 5 (稳定性/亮点)**: 
+    *   **关键代码落地**：实现“请求去重（Singleflight）”和“Redis 缓存”。（参考下方代码）
+*   **Day 6 (测试与优化)**: 
+    *   使用 JMeter 对搜索接口进行压测。
+    *   记录开启缓存前后的 QPS 对比截图（面试证据）。
+*   **Day 7 (复盘)**: 
+    *   将项目写入简历。
+    *   准备面试题（如：为什么选 ES 不选 Milvus？向量维度是多少？）。
 
-![前台商城系统功能演示](./document/resource/re_mall_app_show.jpg)
+---
 
-### 组织结构
+## 5. 核心代码逻辑实现
 
-``` lua
-mall
-├── mall-common -- 工具类及通用代码
-├── mall-mbg -- MyBatisGenerator生成的数据库操作代码
-├── mall-security -- SpringSecurity封装公用模块
-├── mall-admin -- 后台商城管理系统接口
-├── mall-search -- 基于Elasticsearch的商品搜索系统
-├── mall-portal -- 前台商城系统接口
-└── mall-demo -- 框架搭建时的测试代码
+### 5.1 异步向量化消费者（Kafka 批量优化）
+
+```java
+@Component
+public class ProductVectorSyncConsumer {
+    @Autowired private EmbeddingModel embeddingModel;
+    @Autowired private ProductEsRepository esRepo;
+
+    // 批量消费，削峰填谷
+    @KafkaListener(topics = "product_upsert", containerFactory = "batchFactory")
+    public void consume(List<ProductMessage> messages) {
+        List<String> texts = messages.stream()
+            .map(m -> m.getTitle() + " " + m.getDescription())
+            .toList();
+        
+        // 核心亮点：一次网络调用处理多条数据
+        List<List<Double>> vectors = embeddingModel.embed(texts);
+        
+        // ...保存到 ES 逻辑
+    }
+}
 ```
 
-### 技术选型
+### 5.2 混合搜索（Hybrid Search）
 
-#### 后端技术
+```
+public List<Product> hybridSearch(String userQuery) {
+    // 1. 获取查询向量
+    List<Double> queryVector = embeddingModel.embed(userQuery);
+    
+    // 2. 构建 ES 混合查询 (Keyword + Vector)
+    Query query = NativeQuery.builder()
+        .withQuery(q -> q.bool(b -> b
+            .should(s -> s.match(m -> m.field("name").query(userQuery).boost(1.0f))) 
+            .should(s -> s.knn(k -> k.field("vector").vector(queryVector).k(10).boost(2.0f)))
+        )).build();
+    
+    return esTemplate.search(query, Product.class).map(SearchHit::getContent).toList();
+}
+```
 
-| 技术                 | 说明                | 官网                                           |
-| -------------------- | ------------------- | ---------------------------------------------- |
-| SpringBoot           | Web应用开发框架      | https://spring.io/projects/spring-boot         |
-| SpringSecurity       | 认证和授权框架      | https://spring.io/projects/spring-security     |
-| MyBatis              | ORM框架             | http://www.mybatis.org/mybatis-3/zh/index.html |
-| MyBatisGenerator     | 数据层代码生成器     | http://www.mybatis.org/generator/index.html    |
-| Elasticsearch        | 搜索引擎            | https://github.com/elastic/elasticsearch       |
-| RabbitMQ             | 消息队列            | https://www.rabbitmq.com/                      |
-| Redis                | 内存数据存储         | https://redis.io/                              |
-| MongoDB              | NoSql数据库         | https://www.mongodb.com                        |
-| LogStash             | 日志收集工具        | https://github.com/elastic/logstash            |
-| Kibana               | 日志可视化查看工具  | https://github.com/elastic/kibana              |
-| Nginx                | 静态资源服务器      | https://www.nginx.com/                         |
-| Docker               | 应用容器引擎        | https://www.docker.com                         |
-| Jenkins              | 自动化部署工具      | https://github.com/jenkinsci/jenkins           |
-| Druid                | 数据库连接池        | https://github.com/alibaba/druid               |
-| OSS                  | 对象存储            | https://github.com/aliyun/aliyun-oss-java-sdk  |
-| MinIO                | 对象存储            | https://github.com/minio/minio                 |
-| JWT                  | JWT登录支持         | https://github.com/jwtk/jjwt                   |
-| Lombok               | Java语言增强库      | https://github.com/rzwitserloot/lombok         |
-| Hutool               | Java工具类库        | https://github.com/looly/hutool                |
-| PageHelper           | MyBatis物理分页插件 | http://git.oschina.net/free/Mybatis_PageHelper |
-| Swagger-UI           | API文档生成工具      | https://github.com/swagger-api/swagger-ui      |
-| Hibernator-Validator | 验证框架            | http://hibernate.org/validator                 |
+### 5.3 高并发防抖与语义缓存（Singleflight）
 
-#### 前端技术
+```
+@Component
+public class AIChatService {
+    private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
+    @Autowired private RedisTemplate<String, String> redisTemplate;
 
-| 技术       | 说明                  | 官网                                   |
-| ---------- | --------------------- | -------------------------------------- |
-| Vue        | 前端框架              | https://vuejs.org/                     |
-| Vue-router | 路由框架              | https://router.vuejs.org/              |
-| Vuex       | 全局状态管理框架      | https://vuex.vuejs.org/                |
-| Element    | 前端UI框架            | https://element.eleme.io               |
-| Axios      | 前端HTTP框架          | https://github.com/axios/axios         |
-| v-charts   | 基于Echarts的图表框架 | https://v-charts.js.org/               |
-| Js-cookie  | cookie管理工具        | https://github.com/js-cookie/js-cookie |
-| nprogress  | 进度条控件            | https://github.com/rstacruz/nprogress  |
+    public String getAIResponse(String userQuery) {
+        String queryHash = DigestUtils.md5DigestAsHex(userQuery.getBytes());
+        String cacheKey = "ai:cache:" + queryHash;
 
-#### 移动端技术
+        // 1. 查缓存
+        String cached = redisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) return cached;
 
-| 技术         | 说明             | 官网                                    |
-| ------------ | ---------------- | --------------------------------------- |
-| Vue          | 核心前端框架     | https://vuejs.org                       |
-| Vuex         | 全局状态管理框架 | https://vuex.vuejs.org                  |
-| uni-app      | 移动端前端框架   | https://uniapp.dcloud.io                |
-| mix-mall     | 电商项目模板     | https://ext.dcloud.net.cn/plugin?id=200 |
-| luch-request | HTTP请求框架     | https://github.com/lei-mu/luch-request  |
+        // 2. 请求去重 (Singleflight 思想)
+        // 100 个相同请求，只有一个能进入 synchronized 块调用 API
+        synchronized (locks.computeIfAbsent(queryHash, k -> new Object())) {
+            // Double Check
+            cached = redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) return cached;
 
-#### 架构图
+            try {
+                // 3. 调用昂贵的 LLM 服务
+                String result = callLLM(userQuery);
+                // 4. 写入缓存 (TTL 1小时)
+                redisTemplate.opsForValue().set(cacheKey, result, Duration.ofHours(1));
+                return result;
+            } finally {
+                locks.remove(queryHash);
+            }
+        }
+    }
+}
+```
 
-##### 系统架构图
-
-![系统架构图](./document/resource/re_mall_system_arch.jpg)
-
-##### 业务架构图
-
-![业务架构图](./document/resource/re_mall_business_arch.jpg)
-
-#### 模块介绍
-
-##### 后台管理系统 `mall-admin`
-
-- 商品管理：[功能结构图-商品.jpg](document/resource/mind_product.jpg)
-- 订单管理：[功能结构图-订单.jpg](document/resource/mind_order.jpg)
-- 促销管理：[功能结构图-促销.jpg](document/resource/mind_sale.jpg)
-- 内容管理：[功能结构图-内容.jpg](document/resource/mind_content.jpg)
-- 用户管理：[功能结构图-用户.jpg](document/resource/mind_member.jpg)
-
-##### 前台商城系统 `mall-portal`
-
-[功能结构图-前台.jpg](document/resource/mind_portal.jpg)
-
-#### 开发进度
-
-![项目开发进度图](./document/resource/re_mall_dev_flow.jpg)
-
-## 环境搭建
-
-### 开发工具
-
-| 工具          | 说明                | 官网                                            |
-| ------------- | ------------------- | ----------------------------------------------- |
-| IDEA          | 开发IDE             | https://www.jetbrains.com/idea/download         |
-| RedisDesktop  | redis客户端连接工具 | https://github.com/qishibo/AnotherRedisDesktopManager  |
-| Robomongo     | mongo客户端连接工具 | https://robomongo.org/download                  |
-| SwitchHosts   | 本地host管理        | https://oldj.github.io/SwitchHosts/             |
-| X-shell       | Linux远程连接工具   | http://www.netsarang.com/download/software.html |
-| Navicat       | 数据库连接工具      | http://www.formysql.com/xiazai.html             |
-| PowerDesigner | 数据库设计工具      | http://powerdesigner.de/                        |
-| Axure         | 原型设计工具        | https://www.axure.com/                          |
-| MindMaster    | 思维导图设计工具    | http://www.edrawsoft.cn/mindmaster              |
-| ScreenToGif   | gif录制工具         | https://www.screentogif.com/                    |
-| ProcessOn     | 流程图绘制工具      | https://www.processon.com/                      |
-| PicPick       | 图片处理工具        | https://picpick.app/zh/                         |
-| Snipaste      | 屏幕截图工具        | https://www.snipaste.com/                       |
-| Postman       | API接口调试工具      | https://www.postman.com/                        |
-| Typora        | Markdown编辑器      | https://typora.io/                              |
-
-### 开发环境
-
-| 工具          | 版本号 | 下载                                                         |
-| ------------- | ------ | ------------------------------------------------------------ |
-| JDK           | 1.8    | https://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html |
-| MySQL         | 5.7    | https://www.mysql.com/                                       |
-| Redis         | 7.0    | https://redis.io/download                                    |
-| MongoDB       | 5.0    | https://www.mongodb.com/download-center                      |
-| RabbitMQ      | 3.10.5 | http://www.rabbitmq.com/download.html                        |
-| Nginx         | 1.22   | http://nginx.org/en/download.html                            |
-| Elasticsearch | 7.17.3 | https://www.elastic.co/downloads/elasticsearch               |
-| Logstash      | 7.17.3 | https://www.elastic.co/cn/downloads/logstash                 |
-| Kibana        | 7.17.3 | https://www.elastic.co/cn/downloads/kibana                   |
-
-### 搭建步骤
-
-> Windows环境部署
-
-- Windows环境搭建请参考：[mall项目后端开发环境搭建](https://www.macrozheng.com/mall/start/mall_deploy_windows.html);
-- 注意：如果只启动`mall-admin`模块，仅需安装MySQL、Redis即可;
-- 克隆`mall-admin-web`项目，并导入到IDEA中完成编译：[前端项目地址](https://github.com/macrozheng/mall-admin-web);
-- `mall-admin-web`项目的安装及部署请参考：[mall项目前端发环境搭建](https://www.macrozheng.com/mall/start/mall_deploy_web.html) 。
-
-> Docker环境部署
-
-- 使用虚拟机安装CentOS7.6请参考：[虚拟机安装及使用Linux，看这一篇就够了](https://www.macrozheng.com/mall/deploy/linux_install.html);
-- 本项目Docker镜像构建请参考：[使用Maven插件为SpringBoot应用构建Docker镜像](https://www.macrozheng.com/project/maven_docker_fabric8.html);
-- 本项目在Docker容器下的部署请参考：[mall在Linux环境下的部署（基于Docker容器）](https://www.macrozheng.com/mall/deploy/mall_deploy_docker.html);
-- 本项目使用Docker Compose请参考： [mall在Linux环境下的部署（基于Docker Compose）](https://www.macrozheng.com/mall/deploy/mall_deploy_docker_compose.html);
-- 本项目在Linux下的自动化部署请参考：[mall在Linux环境下的自动化部署（基于Jenkins）](https://www.macrozheng.com/mall/deploy/mall_deploy_jenkins.html);
-
-## 公众号
-
-加微信群交流，关注公众号「**macrozheng**」，回复「**加群**」即可。
-
-![公众号图片](./document/resource/qrcode_for_macrozheng_258.jpg)
-
-## 许可证
-
-[Apache License 2.0](https://github.com/macrozheng/mall/blob/master/LICENSE)
-
-Copyright (c) 2018-2025 macrozheng
