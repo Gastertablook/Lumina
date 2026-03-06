@@ -32,6 +32,19 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
         </dependency>
+        <!-- LangChain4j 本地嵌入模型 (无需 API Key，免费，下载即用) -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-embeddings-all-minilm-l6-v2</artifactId>
+            <version>0.31.0</version> 
+        </dependency>
+
+        <!-- 必须添加：LangChain4j 核心包 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+            <version>0.31.0</version>
+        </dependency>
     </dependencies>
 
     <build>
