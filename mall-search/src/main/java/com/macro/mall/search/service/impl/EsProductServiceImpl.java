@@ -7,11 +7,15 @@ import com.macro.mall.search.domain.EsProduct;
 import com.macro.mall.search.domain.EsProductRelatedInfo;
 import com.macro.mall.search.repository.EsProductRepository;
 import com.macro.mall.search.service.EsProductService;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.elasticsearch.common.lucene.search.function.FunctionScoreQuery;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
 import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilders;
+import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.search.aggregations.AbstractAggregationBuilder;
 import org.elasticsearch.search.aggregations.Aggregation;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
@@ -39,6 +43,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -58,9 +63,61 @@ public class EsProductServiceImpl implements EsProductService {
     private EsProductRepository productRepository;
     @Autowired
     private ElasticsearchRestTemplate elasticsearchRestTemplate;
+
+    // 注入配置的 AI 模型
+    @Autowired
+    private EmbeddingModel embeddingModel;
+
     @Override
     public int importAll() {
+        // 1. 从 MySQL 获取所有商品数据
         List<EsProduct> esProductList = productDao.getAllEsProductList(null);
+
+        if (CollectionUtils.isEmpty(esProductList)) {
+            return 0;
+        }
+
+        // 2. 遍历商品，生成向量 (这是最耗时的步骤，Day 2 规划中我们以后会用 Kafka 优化这里)
+        LOGGER.info("开始对 {} 个商品进行向量化处理...", esProductList.size());
+        long start = System.currentTimeMillis();
+
+        for (EsProduct product : esProductList) {
+            // 2.1 准备 Embedding 的文本素材
+            // 策略：组合 标题 + 副标题 + 关键词
+            String textToEmbed = product.getName() + " " + product.getSubTitle() + " " + product.getKeywords();
+
+            // 处理空值，防止报错
+            if (textToEmbed == null || textToEmbed.trim().isEmpty()) {
+                textToEmbed = product.getName();
+            }
+
+            try {
+                // 2.2 调用本地 AI 模型生成向量
+                // embeddingModel.embed 返回的是 float[]，需要转成 List<Double>
+                dev.langchain4j.data.segment.TextSegment segment = dev.langchain4j.data.segment.TextSegment.from(textToEmbed);
+                dev.langchain4j.model.output.Response<Embedding> response = embeddingModel.embed(segment);
+
+                float[] vectorFloat = response.content().vector();
+
+                // 2.3 转换类型 float[] -> List<Double>
+                List<Double> vectorDouble = new ArrayList<>();
+                for (float f : vectorFloat) {
+                    vectorDouble.add((double) f);
+                }
+
+                // 2.4 填入实体
+                product.setVector(vectorDouble);
+
+            } catch (Exception e) {
+                LOGGER.error("商品 ID:{} 向量化失败", product.getId(), e);
+                // 可以选择 continue 跳过，或者保留空向量
+            }
+        }
+
+        long end = System.currentTimeMillis();
+        LOGGER.info("向量化完成，耗时: {}ms", (end - start));
+
+        // 3. 批量保存到 ES (Spring Data 会自动创建带 Mapping 的新索引)
         Iterable<EsProduct> esProductIterable = productRepository.saveAll(esProductList);
         Iterator<EsProduct> iterator = esProductIterable.iterator();
         int result = 0;
@@ -213,6 +270,78 @@ public class EsProductServiceImpl implements EsProductService {
             return new PageImpl<>(searchProductList,pageable,searchHits.getTotalHits());
         }
         return new PageImpl<>(ListUtil.empty());
+    }
+
+    @Override
+    public Page<EsProduct> hybridSearch(String keyword, Long brandId, Long productCategoryId,
+                                         Integer pageNum, Integer pageSize) {
+        Pageable pageable = PageRequest.of(pageNum, pageSize);
+        NativeSearchQueryBuilder nativeSearchQueryBuilder = new NativeSearchQueryBuilder();
+        nativeSearchQueryBuilder.withPageable(pageable);
+
+        if (brandId != null || productCategoryId != null) {
+            BoolQueryBuilder filterQuery = QueryBuilders.boolQuery();
+            if (brandId != null) {
+                filterQuery.must(QueryBuilders.termQuery("brandId", brandId));
+            }
+            if (productCategoryId != null) {
+                filterQuery.must(QueryBuilders.termQuery("productCategoryId", productCategoryId));
+            }
+            nativeSearchQueryBuilder.withFilter(filterQuery);
+        }
+
+        if (StrUtil.isEmpty(keyword)) {
+            nativeSearchQueryBuilder.withQuery(QueryBuilders.matchAllQuery());
+        } else {
+            // 1. 将用户关键词转为查询向量
+            float[] queryVectorFloat = embeddingModel.embed(keyword).content().vector();
+            List<Double> queryVector = new ArrayList<>();
+            for (float f : queryVectorFloat) {
+                queryVector.add((double) f);
+            }
+
+            BoolQueryBuilder hybridQuery = QueryBuilders.boolQuery();
+
+            // 通道A：关键词加权匹配 (function_score)
+            List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders = new ArrayList<>();
+            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(
+                    QueryBuilders.matchQuery("name", keyword),
+                    ScoreFunctionBuilders.weightFactorFunction(10)));
+            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(
+                    QueryBuilders.matchQuery("subTitle", keyword),
+                    ScoreFunctionBuilders.weightFactorFunction(5)));
+            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(
+                    QueryBuilders.matchQuery("keywords", keyword),
+                    ScoreFunctionBuilders.weightFactorFunction(2)));
+            FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders =
+                    filterFunctionBuilders.toArray(new FunctionScoreQueryBuilder.FilterFunctionBuilder[0]);
+            FunctionScoreQueryBuilder keywordScoreQuery = QueryBuilders.functionScoreQuery(builders)
+                    .scoreMode(FunctionScoreQuery.ScoreMode.SUM)
+                    .setMinScore(2);
+            hybridQuery.should(keywordScoreQuery);
+
+            // 通道B：向量余弦相似度 (script_score)
+            Map<String, Object> params = new HashMap<>();
+            params.put("query_vector", queryVector);
+            Script script = new Script(ScriptType.INLINE, "painless",
+                    "(cosineSimilarity(params.query_vector, 'vector') + 1.0) * 10",
+                    params);
+            hybridQuery.should(QueryBuilders.scriptScoreQuery(QueryBuilders.matchAllQuery(), script));
+
+            nativeSearchQueryBuilder.withQuery(hybridQuery);
+        }
+
+        nativeSearchQueryBuilder.withSorts(SortBuilders.scoreSort().order(SortOrder.DESC));
+        NativeSearchQuery searchQuery = nativeSearchQueryBuilder.build();
+        LOGGER.info("Hybrid Search DSL:{}", searchQuery.getQuery().toString());
+
+        SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
+        if (searchHits.getTotalHits() <= 0) {
+            return new PageImpl<>(ListUtil.empty(), pageable, 0);
+        }
+        List<EsProduct> searchProductList = searchHits.stream()
+                .map(SearchHit::getContent).collect(Collectors.toList());
+        return new PageImpl<>(searchProductList, pageable, searchHits.getTotalHits());
     }
 
     @Override

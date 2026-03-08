@@ -48,4 +48,9 @@ public class EsProduct implements Serializable {
     private Integer sort;
     @Field(type = FieldType.Nested, fielddata = true)
     private List<EsProductAttributeValue> attrValueList;
+    // 【新增】向量字段
+    // type = Dense_Vector (稠密向量)
+    // dims = 384 (因为我们用的 all-minilm-l6-v2 模型输出就是 384 维)
+    @Field(type = FieldType.Dense_Vector, dims = 384) // 维度必须匹配 all-minilm-l6-v2
+    private List<Double> vector;
 }
