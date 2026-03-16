@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot - MallSearchApplication",
+            "request": "launch",
+            "mainClass": "com.macro.mall.search.MallSearchApplication",
+            "projectName": "mall-search",
+            "args": "",
+            "vmArgs": "-Dspring.profiles.active=dev"
+        }
+    ]
+}

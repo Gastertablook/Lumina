@@ -45,6 +45,13 @@
             <artifactId>langchain4j-core</artifactId>
             <version>0.31.0</version>
         </dependency>
+
+        <!-- LangChain4j OpenAI 供应商 (用于调用 GPT 或 DeepSeek) -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>0.31.0</version>
+        </dependency>   
     </dependencies>
 
     <build>
