@@ -51,7 +51,13 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
             <version>0.31.0</version>
-        </dependency>   
+        </dependency>
+        
+        <!-- 我们手动显式引入 Redis 依赖，用于 AI 语义缓存与 Singleflight 防抖 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

@@ -27,7 +27,6 @@ import org.elasticsearch.search.aggregations.bucket.terms.ParsedStringTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
-import org.elasticsearch.index.query.Operator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -306,9 +305,9 @@ public class EsProductServiceImpl implements EsProductService {
             // 通道A：关键词原生相关性匹配 (利用 ES 底层的 BM25 算法 + 权重放大)
             // 说明：只要命中分词中的部分词汇就能得分。命中的词越多，得分自然越高！
             BoolQueryBuilder textQuery = QueryBuilders.boolQuery()
-                .should(QueryBuilders.matchQuery("name", keyword).boost(2.0f))      // 命中名字，原生分数放大 5 倍
-                .should(QueryBuilders.matchQuery("subTitle", keyword).boost(1.0f))  // 命中副标题，放大 2 倍
-                .should(QueryBuilders.matchQuery("keywords", keyword).boost(0.5f)); // 命中关键字，不放大
+                .should(QueryBuilders.matchQuery("name", keyword).boost(2.0f))      // 命中名字，原生分数放大 2 倍
+                .should(QueryBuilders.matchQuery("subTitle", keyword).boost(1.0f))
+                .should(QueryBuilders.matchQuery("keywords", keyword).boost(0.5f));
 
             hybridQuery.should(textQuery);
 

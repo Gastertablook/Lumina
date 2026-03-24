@@ -6,11 +6,8 @@ import com.macro.mall.search.service.EsProductService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.macro.mall.mapper.PmsBrandMapper;
-import com.macro.mall.mapper.PmsProductCategoryMapper;
 import com.macro.mall.model.PmsBrand;
 import com.macro.mall.model.PmsBrandExample;
-import com.macro.mall.model.PmsProductCategory;
-import com.macro.mall.model.PmsProductCategoryExample;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -24,12 +21,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.util.DigestUtils;
 
 import javax.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class AiChatGuideServiceImpl implements AiChatGuideService {
@@ -41,9 +41,6 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
 
     @Autowired
     private PmsBrandMapper pmsBrandMapper; // 注入品牌Mapper
-
-    @Autowired
-    private PmsProductCategoryMapper pmsProductCategoryMapper; // 注入分类Mapper
 
     @Value("${ai.llm.api-key}")
     private String apiKey;
@@ -61,6 +58,9 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
     // 注入 ObjectMapper 用于解析 JSON
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
 
     // 内部类用于承载意图
     private static class IntentMapping {
@@ -130,6 +130,36 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
         // 设置 SSE 超时时间，通常大模型生成不会超过 2 分钟 (120000毫秒)
         SseEmitter emitter = new SseEmitter(120000L);
 
+        // ================== 【缓存命中：直接返回】 ==================
+        // 核心逻辑一：生成全局唯一的语义缓存 Key
+        // 使用 MD5 对用户的查询词进行摘要，确保 Key 长度固定且唯一
+        String queryHash = DigestUtils.md5DigestAsHex(userQuery.getBytes());
+        String cacheKey = "lumina:ai:cache:" + queryHash;
+
+        // 核心逻辑二：查缓存（防线拦截）
+        String cachedResponse = null;
+        try {
+            cachedResponse = redisTemplate.opsForValue().get(cacheKey);
+        } catch (Exception e) {
+            LOGGER.error("Redis 缓存读取异常，降级穿透到大模型", e);
+        }
+
+        if (cachedResponse != null) {
+            LOGGER.info("====== 🎯 命中 Redis 语义缓存！极速响应！ ======");
+            try {
+                // 直接把从 Redis 拿到的整段超长文本，作为一次 SSE 事件推给前端
+                emitter.send(cachedResponse);
+                emitter.complete(); // 立刻关闭连接，释放 Tomcat 线程资源
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+            // 命中缓存直接 return，下面的逻辑全都不走！
+            return emitter;
+        }
+
+        // ================== 【缓存未命中：走真实的大模型大闭环】 ==================
+        LOGGER.info("====== 缓存未命中，启动大模型意图提取与混合检索... ======");
+
         // 第一步：意图提取 (Query Rewriting) -> 将罗嗦的话变成精准搜索词
         // 1. 调用新版意图提取
         IntentMapping intent = extractIntent(userQuery);
@@ -195,6 +225,9 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
         // 第三步：构建给前端对话的 Prompt (依然传入用户的原始问题 userQuery 保证态度亲切)
         String prompt = buildPrompt(userQuery, productContext);
 
+        // 核心逻辑三：准备一个 StringBuffer 充当“收集篮”，收集大模型吐出的所有碎片
+        StringBuffer responseCollector = new StringBuffer();
+
         LOGGER.info("====== 正在请求大模型流式生成导购建议... ======");
         
         // 第四步：触发大模型流式生成 (异步回调)
@@ -203,7 +236,8 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             public void onNext(String token) {
                 try {
                     // 每当大模型吐出一个字或词，立刻通过 SSE 推给前端
-                    emitter.send(token);
+                    emitter.send(token); // 实时推给前端 (打字机效果)
+                    responseCollector.append(token); // 悄悄把字存入收集篮
                 } catch (Exception e) {
                     LOGGER.error("SSE 推送异常", e);
                     emitter.completeWithError(e);
@@ -213,6 +247,15 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             @Override
             public void onComplete(Response<AiMessage> response) {
                 LOGGER.info("====== 大模型流式回复输出完毕 ======");
+                // 核心逻辑四：【闭环关键】在结束的一瞬间，把收集篮里攒好的完整回复存入 Redis！
+                try {
+                    // 设置缓存过期时间为 24 小时 (可根据实际情况调整)
+                    redisTemplate.opsForValue().set(cacheKey, responseCollector.toString(), 24, TimeUnit.HOURS);
+                    LOGGER.info("====== 导购结果已成功写入 Redis 缓存，Key: {} ======", cacheKey);
+                } catch (Exception e) {
+                    LOGGER.error("写入 Redis 缓存失败", e);
+                }
+
                 // 告诉前端：流传输结束了
                 emitter.complete();
             }
