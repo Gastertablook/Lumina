@@ -29,6 +29,8 @@ import org.springframework.util.DigestUtils;
 import javax.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -61,6 +63,10 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    // 【架构核心组件】：Singleflight 正在飞行（处理中）的任务登记簿
+    // Key: 查询的 MD5 Hash, Value: 存放完整回复的“未来承诺”
+    private final ConcurrentHashMap<String, CompletableFuture<String>> inFlightRequests = new ConcurrentHashMap<>();
 
     // 内部类用于承载意图
     private static class IntentMapping {
@@ -130,13 +136,11 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
         // 设置 SSE 超时时间，通常大模型生成不会超过 2 分钟 (120000毫秒)
         SseEmitter emitter = new SseEmitter(120000L);
 
-        // ================== 【缓存命中：直接返回】 ==================
-        // 核心逻辑一：生成全局唯一的语义缓存 Key
         // 使用 MD5 对用户的查询词进行摘要，确保 Key 长度固定且唯一
         String queryHash = DigestUtils.md5DigestAsHex(userQuery.getBytes());
         String cacheKey = "lumina:ai:cache:" + queryHash;
 
-        // 核心逻辑二：查缓存（防线拦截）
+        // ================== 【防线一：查 Redis 缓存】 ==================
         String cachedResponse = null;
         try {
             cachedResponse = redisTemplate.opsForValue().get(cacheKey);
@@ -145,20 +149,41 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
         }
 
         if (cachedResponse != null) {
-            LOGGER.info("====== 🎯 命中 Redis 语义缓存！极速响应！ ======");
-            try {
-                // 直接把从 Redis 拿到的整段超长文本，作为一次 SSE 事件推给前端
-                emitter.send(cachedResponse);
-                emitter.complete(); // 立刻关闭连接，释放 Tomcat 线程资源
-            } catch (Exception e) {
-                emitter.completeWithError(e);
-            }
+            LOGGER.info("====== 命中 Redis 语义缓存！极速响应！ ======");
+            sendSingleChunkAndComplete(emitter, cachedResponse);
             // 命中缓存直接 return，下面的逻辑全都不走！
             return emitter;
         }
 
-        // ================== 【缓存未命中：走真实的大模型大闭环】 ==================
-        LOGGER.info("====== 缓存未命中，启动大模型意图提取与混合检索... ======");
+        // ================== 【防线二：Singleflight 并发拦截】 ==================
+        // 1. 创建一个代表“未来结果”的空承诺
+        CompletableFuture<String> newPromise = new CompletableFuture<>();
+        // 2. 尝试把这个承诺登记到并发字典里（putIfAbsent 是原子操作，绝对线程安全）
+        CompletableFuture<String> existingPromise = inFlightRequests.putIfAbsent(cacheKey, newPromise);
+
+        if (existingPromise != null) {
+            // 【情况 A：我们是跟随者！】
+            // 发现字典里已经有别人的承诺了，说明此时此刻已经有别的线程在请求大模型了！
+            LOGGER.warn("====== 触发 Singleflight 防击穿！当前请求原地等待先锋请求的结果... ======");
+            
+            // 为了不阻塞当前 Tomcat 主线程返回 SseEmitter，我们开一个异步线程去“等”
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // 🌟 这里的 .get() 会优雅地阻塞，直到先锋把结果装进去！
+                    String sharedResult = existingPromise.get(); 
+                    LOGGER.info("====== 拿到先锋请求共享的结果，瞬间推给前端！ ======");
+                    sendSingleChunkAndComplete(emitter, sharedResult);
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            });
+            // 瞬间返回 emitter，让前端保持连接并等待
+            return emitter;
+        }
+
+        // ================== 【情况 B：我们是先锋！】 ==================
+        // 字典里没东西，我们成功登记了 newPromise，我们必须亲自去请求大模型！
+        LOGGER.info("====== 没有缓存，也没有并发请求，作为【先锋】启动大模型生成... ======");
 
         // 第一步：意图提取 (Query Rewriting) -> 将罗嗦的话变成精准搜索词
         // 1. 调用新版意图提取
@@ -249,8 +274,12 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
                 LOGGER.info("====== 大模型流式回复输出完毕 ======");
                 // 核心逻辑四：【闭环关键】在结束的一瞬间，把收集篮里攒好的完整回复存入 Redis！
                 try {
-                    // 设置缓存过期时间为 24 小时 (可根据实际情况调整)
+                    // 写入 Redis 缓存，设置缓存过期时间为 24 小时 (可根据实际情况调整)
                     redisTemplate.opsForValue().set(cacheKey, responseCollector.toString(), 24, TimeUnit.HOURS);
+                    // 【核心唤醒】：把完整结果装入承诺中，瞬间唤醒所有等待在这个承诺上的“跟随者”！
+                    newPromise.complete(responseCollector.toString());
+                    // 功成身退，把这个任务从登记簿里划掉
+                    inFlightRequests.remove(cacheKey);
                     LOGGER.info("====== 导购结果已成功写入 Redis 缓存，Key: {} ======", cacheKey);
                 } catch (Exception e) {
                     LOGGER.error("写入 Redis 缓存失败", e);
@@ -263,6 +292,9 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             @Override
             public void onError(Throwable error) {
                 LOGGER.error("大模型流式调用发生错误", error);
+                // 如果出错了，也要告诉跟随者们“抱歉任务失败了”，并清理登记簿
+                newPromise.completeExceptionally(error);
+                inFlightRequests.remove(cacheKey);
                 emitter.completeWithError(error);
             }
         });
@@ -329,5 +361,16 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             "4. 严禁推荐列表中不存在的商品！",
             productContext, userQuery
         );
+    }
+
+    // 辅助方法：一次性把巨量文本通过 SSE 推给前端并断开
+    private void sendSingleChunkAndComplete(SseEmitter emitter, String text) {
+        try {
+            // 直接把从 Redis 拿到的整段超长文本，作为一次 SSE 事件推给前端
+            emitter.send(text);
+            emitter.complete(); // 立刻关闭连接，释放 Tomcat 线程资源
+        } catch (Exception e) {
+            emitter.completeWithError(e);
+        }
     }
 }
