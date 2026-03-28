@@ -1,6 +1,7 @@
 package com.macro.mall.search.service.impl;
 
 import com.macro.mall.search.domain.EsProduct;
+import com.macro.mall.search.domain.SemanticCache;
 import com.macro.mall.search.service.AiChatGuideService;
 import com.macro.mall.search.service.EsProductService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,8 +14,9 @@ import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.StreamingResponseHandler;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.data.message.AiMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,16 +24,28 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.elasticsearch.core.ElasticsearchRestTemplate;
+import org.springframework.data.elasticsearch.core.SearchHit;
+import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.core.query.NativeSearchQuery;
+import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.util.DigestUtils;
+import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptType;
+import org.elasticsearch.index.query.QueryBuilders;
 
 import javax.annotation.PostConstruct;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Service
 public class AiChatGuideServiceImpl implements AiChatGuideService {
@@ -63,6 +77,13 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private ElasticsearchRestTemplate elasticsearchRestTemplate; // 用于操作 ES 缓存库
+
+    @Autowired
+    private EmbeddingModel embeddingModel; // 注入本地的 all-minilm-l6-v2 模型
+
 
     // 【架构核心组件】：Singleflight 正在飞行（处理中）的任务登记簿
     // Key: 查询的 MD5 Hash, Value: 存放完整回复的“未来承诺”
@@ -138,12 +159,12 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
 
         // 使用 MD5 对用户的查询词进行摘要，确保 Key 长度固定且唯一
         String queryHash = DigestUtils.md5DigestAsHex(userQuery.getBytes());
-        String cacheKey = "lumina:ai:cache:" + queryHash;
+        String redisCacheKey = "lumina_v5:ai:cache:" + queryHash;
 
-        // ================== 【防线一：查 Redis 缓存】 ==================
+        // ================== 【L1 防线：Redis 精确缓】 ==================
         String cachedResponse = null;
         try {
-            cachedResponse = redisTemplate.opsForValue().get(cacheKey);
+            cachedResponse = redisTemplate.opsForValue().get(redisCacheKey);
         } catch (Exception e) {
             LOGGER.error("Redis 缓存读取异常，降级穿透到大模型", e);
         }
@@ -155,14 +176,13 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             return emitter;
         }
 
-        // ================== 【防线二：Singleflight 并发拦截】 ==================
+        // ================== 【并发防线：Singleflight 拦截】 ==================
         // 1. 创建一个代表“未来结果”的空承诺
         CompletableFuture<String> newPromise = new CompletableFuture<>();
         // 2. 尝试把这个承诺登记到并发字典里（putIfAbsent 是原子操作，绝对线程安全）
-        CompletableFuture<String> existingPromise = inFlightRequests.putIfAbsent(cacheKey, newPromise);
+        CompletableFuture<String> existingPromise = inFlightRequests.putIfAbsent(redisCacheKey, newPromise);
 
         if (existingPromise != null) {
-            // 【情况 A：我们是跟随者！】
             // 发现字典里已经有别人的承诺了，说明此时此刻已经有别的线程在请求大模型了！
             LOGGER.warn("====== 触发 Singleflight 防击穿！当前请求原地等待先锋请求的结果... ======");
             
@@ -181,9 +201,63 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
             return emitter;
         }
 
-        // ================== 【情况 B：我们是先锋！】 ==================
-        // 字典里没东西，我们成功登记了 newPromise，我们必须亲自去请求大模型！
-        LOGGER.info("====== 没有缓存，也没有并发请求，作为【先锋】启动大模型生成... ======");
+        LOGGER.info("====== L1 缓存未命中，当前为先锋请求，准备进入 L2 语义防线 ======");
+
+        // ================== 【L2 防线：ES 混合语义缓存 (双重锁)】 ==================
+        // 1. 将用户的新问题瞬间向量化 (耗时约 10-20ms)
+        float[] queryVectorFloat = embeddingModel.embed(userQuery).content().vector();
+        List<Double> queryVector = new ArrayList<>();
+        for (float f : queryVectorFloat) {
+            queryVector.add((double) f);
+        }
+
+        // 2. 构造 ES 余弦相似度查询
+        Map<String, Object> params = new HashMap<>();
+        params.put("query_vector", queryVector);
+        // ES 中的 cosineSimilarity 范围是[-1, 1]，加 1 后范围是 [0, 2]
+        // 阈值 0.85 对应的 script score 是 1.85
+        Script script = new Script(ScriptType.INLINE, "painless",
+            "cosineSimilarity(params.query_vector, 'queryVector') + 1.0", params);
+
+        // 【核心改造】：引入 BoolQuery，将文本匹配与向量打分结合
+        // 1. 词法防线：利用 IK 分词器，要求新老问题Operator.AND（必须 100% 包含本次用户提问提取出的所有实词）
+        org.elasticsearch.index.query.MatchQueryBuilder textMatch = 
+                QueryBuilders.matchQuery("queryText", userQuery)
+                             .operator(org.elasticsearch.index.query.Operator.AND); // 开启全词汇强制锁
+                
+        // 2. 语义防线：计算向量得分
+        org.elasticsearch.index.query.QueryBuilder vectorScore =
+                QueryBuilders.scriptScoreQuery(QueryBuilders.matchAllQuery(), script);
+
+        org.elasticsearch.index.query.BoolQueryBuilder dualLockQuery = QueryBuilders.boolQuery()
+                .must(textMatch)    // 必须满足词汇重合 (拦截"电视"和"手机"的混淆)
+                .must(vectorScore); // 必须进行向量算分
+            
+        NativeSearchQuery semanticSearchQuery = new NativeSearchQueryBuilder()
+                .withQuery(dualLockQuery)
+                .withMinScore(1.85f) // 阈值可以保持 1.85f（即相似度0.85），因为有上面的词法锁兜底了！
+                .withMaxResults(1) // 只需要最相似的一条
+                .build();
+
+        SearchHits<SemanticCache> cacheHits = elasticsearchRestTemplate.search(semanticSearchQuery, SemanticCache.class);
+        
+        if (cacheHits.getTotalHits() > 0) {
+            SemanticCache topCache = cacheHits.getSearchHit(0).getContent();
+            LOGGER.info("====== 🧠 命中 L2 ES 语义缓存！相似度极高，拦截成功！历史提问: [{}] ======", topCache.getQueryText());
+            
+            String llmResponse = topCache.getLlmResponse();
+            
+            // 命中 L2 后，不仅要返回给前端，还要把这个新问题“回写”到 L1 Redis 中，方便下次 7ms 极速命中！
+            redisTemplate.opsForValue().set(redisCacheKey, llmResponse, 24, TimeUnit.HOURS);
+            newPromise.complete(llmResponse); // 唤醒可能的并发跟随者
+            inFlightRequests.remove(redisCacheKey);
+            
+            sendSingleChunkAndComplete(emitter, llmResponse);
+            return emitter;
+        }
+
+        // ================== 【防线全面击穿：走真实 LLM 大闭环】 ==================
+        LOGGER.info("====== L2 缓存未命中，启动真实 LLM 意图提取与混合检索... ======");
 
         // 第一步：意图提取 (Query Rewriting) -> 将罗嗦的话变成精准搜索词
         // 1. 调用新版意图提取
@@ -250,11 +324,14 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
         // 第三步：构建给前端对话的 Prompt (依然传入用户的原始问题 userQuery 保证态度亲切)
         String prompt = buildPrompt(userQuery, productContext);
 
+        // 【关键修复】：为了让匿名内部类能够使用，我们创建一个 final 的副本
+        final List<EsProduct> finalRelevantProducts = relevantProducts;
+
         // 核心逻辑三：准备一个 StringBuffer 充当“收集篮”，收集大模型吐出的所有碎片
         StringBuffer responseCollector = new StringBuffer();
 
         LOGGER.info("====== 正在请求大模型流式生成导购建议... ======");
-        
+
         // 第四步：触发大模型流式生成 (异步回调)
         streamingChatModel.generate(prompt, new StreamingResponseHandler<AiMessage>() {
             @Override
@@ -274,13 +351,33 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
                 LOGGER.info("====== 大模型流式回复输出完毕 ======");
                 // 核心逻辑四：【闭环关键】在结束的一瞬间，把收集篮里攒好的完整回复存入 Redis！
                 try {
-                    // 写入 Redis 缓存，设置缓存过期时间为 24 小时 (可根据实际情况调整)
-                    redisTemplate.opsForValue().set(cacheKey, responseCollector.toString(), 24, TimeUnit.HOURS);
-                    // 【核心唤醒】：把完整结果装入承诺中，瞬间唤醒所有等待在这个承诺上的“跟随者”！
-                    newPromise.complete(responseCollector.toString());
+                    String fullText = responseCollector.toString();
+                    // 1. 回写 L1: 写入 Redis 缓存，设置缓存过期时间为 1 小时 
+                    redisTemplate.opsForValue().set(redisCacheKey, fullText, 1, TimeUnit.HOURS);
+
+                    // 2. 回写 L2: ES 语义缓存 (沉淀核心资产)
+                    SemanticCache newCache = new SemanticCache();
+                    newCache.setQueryText(userQuery);
+                    newCache.setQueryVector(queryVector); // 存入之前算好的向量
+                    newCache.setLlmResponse(fullText);
+                    newCache.setCreateTime(System.currentTimeMillis());
+
+                    // 【核心新增】：提取本次参考的商品 ID，作为“血缘依赖”存入缓存
+                    if (finalRelevantProducts != null && !finalRelevantProducts.isEmpty()) {
+                        List<Long> pIds = finalRelevantProducts.stream()
+                                        .map(EsProduct::getId)
+                                        .collect(Collectors.toList());
+                        newCache.setRefProductIds(pIds);
+                    }
+                    
+                    elasticsearchRestTemplate.save(newCache);
+                    LOGGER.info("====== 导购结果已成功沉淀至 L2 ES 语义知识库 ======");
+
+                    // 3. 把完整结果装入承诺中，瞬间唤醒所有等待在这个承诺上的“跟随者”！
+                    newPromise.complete(fullText);
                     // 功成身退，把这个任务从登记簿里划掉
-                    inFlightRequests.remove(cacheKey);
-                    LOGGER.info("====== 导购结果已成功写入 Redis 缓存，Key: {} ======", cacheKey);
+                    inFlightRequests.remove(redisCacheKey);
+                    LOGGER.info("====== 导购结果已成功写入 Redis 缓存，Key: {} ======", redisCacheKey);
                 } catch (Exception e) {
                     LOGGER.error("写入 Redis 缓存失败", e);
                 }
@@ -294,7 +391,7 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
                 LOGGER.error("大模型流式调用发生错误", error);
                 // 如果出错了，也要告诉跟随者们“抱歉任务失败了”，并清理登记簿
                 newPromise.completeExceptionally(error);
-                inFlightRequests.remove(cacheKey);
+                inFlightRequests.remove(redisCacheKey);
                 emitter.completeWithError(error);
             }
         });
