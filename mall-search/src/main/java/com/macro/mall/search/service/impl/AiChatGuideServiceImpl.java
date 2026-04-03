@@ -159,7 +159,7 @@ public class AiChatGuideServiceImpl implements AiChatGuideService {
 
         // 使用 MD5 对用户的查询词进行摘要，确保 Key 长度固定且唯一
         String queryHash = DigestUtils.md5DigestAsHex(userQuery.getBytes());
-        String redisCacheKey = "lumina_v5:ai:cache:" + queryHash;
+        String redisCacheKey = "lumina_v6:ai:cache:" + queryHash;
 
         // ================== 【L1 防线：Redis 精确缓】 ==================
         String cachedResponse = null;

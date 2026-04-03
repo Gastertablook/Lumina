@@ -1,6 +1,7 @@
 package com.macro.mall.search.controller;
 
 import com.macro.mall.common.api.CommonResult;
+import com.macro.mall.search.domain.ProductChangeMessage;
 import com.macro.mall.search.service.AiChatGuideService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -47,5 +48,22 @@ public class AiChatGuideController {
         
         // 注意：SSE 接口不需要用 CommonResult 包装，否则会破坏流式数据协议！
         return aiChatGuideService.generateStreamShoppingGuide(query);
+    }
+
+    @Autowired
+    private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
+
+    @ApiOperation(value = "[测试用] 模拟后台运营修改商品价格，触发 Kafka 消息")
+    @RequestMapping(value = "/mockUpdatePrice", method = RequestMethod.POST)
+    @ResponseBody
+    public CommonResult<String> mockUpdatePrice(@RequestParam("productId") Long productId) {
+        
+        // 构造一条商品变更消息
+        ProductChangeMessage message = new ProductChangeMessage(productId, "UPDATE_PRICE");
+        
+        // 发送到 Kafka 的 product_change_topic 主题
+        kafkaTemplate.send("product_change_topic", message);
+        
+        return CommonResult.success("Kafka 消息发送成功，商品ID: " + productId);
     }
 }
