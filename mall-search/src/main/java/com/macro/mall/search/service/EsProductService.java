@@ -50,4 +50,10 @@ public interface EsProductService {
      * 搜索关键字相关品牌、分类、属性
      */
     EsProductRelatedInfo searchRelatedInfo(String keyword);
+
+    /**
+     * 混合检索：关键词匹配 + 语义向量相似度融合
+     */
+    Page<EsProduct> hybridSearch(String keyword, Long brandId, Long productCategoryId,
+                                 Integer pageNum, Integer pageSize);
 }

@@ -99,6 +99,20 @@ public class EsProductController {
         return CommonResult.success(CommonPage.restPage(esProductPage));
     }
 
+    @ApiOperation(value = "混合搜索（关键词 + 语义向量融合）")
+    @RequestMapping(value = "/search/hybrid", method = RequestMethod.GET)
+    @ResponseBody
+    public CommonResult<CommonPage<EsProduct>> hybridSearch(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) Long productCategoryId,
+            @RequestParam(required = false, defaultValue = "0") Integer pageNum,
+            @RequestParam(required = false, defaultValue = "5") Integer pageSize) {
+        Page<EsProduct> esProductPage = esProductService.hybridSearch(
+                keyword, brandId, productCategoryId, pageNum, pageSize);
+        return CommonResult.success(CommonPage.restPage(esProductPage));
+    }
+
     @ApiOperation(value = "获取搜索的相关品牌、分类及筛选属性")
     @RequestMapping(value = "/search/relate", method = RequestMethod.GET)
     @ResponseBody

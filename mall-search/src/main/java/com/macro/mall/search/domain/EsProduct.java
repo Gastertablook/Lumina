@@ -33,11 +33,11 @@ public class EsProduct implements Serializable {
     @Field(type = FieldType.Keyword)
     private String productCategoryName;
     private String pic;
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String name;
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String subTitle;
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Text, analyzer = "ik_max_word", searchAnalyzer = "ik_smart")
     private String keywords;
     private BigDecimal price;
     private Integer sale;
@@ -48,4 +48,9 @@ public class EsProduct implements Serializable {
     private Integer sort;
     @Field(type = FieldType.Nested, fielddata = true)
     private List<EsProductAttributeValue> attrValueList;
+    // 【新增】向量字段
+    // type = Dense_Vector (稠密向量)
+    // dims = 384 (因为我们用的 all-minilm-l6-v2 模型输出就是 384 维)
+    @Field(type = FieldType.Dense_Vector, dims = 384) // 维度必须匹配 all-minilm-l6-v2
+    private List<Double> vector;
 }
